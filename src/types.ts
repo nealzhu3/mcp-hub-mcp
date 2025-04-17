@@ -43,8 +43,16 @@ export interface McpServerConfig {
   command: string;
   args?: string[];
   env?: Record<string, string>;
+  filters?: ToolFilterConfig;
 }
 
 export interface McpConfig {
   mcpServers: Record<string, McpServerConfig>;
+  globalFilters?: ToolFilterConfig;
+}
+
+// New interfaces for tool filtering
+export interface ToolFilterConfig {
+  include?: string[];
+  exclude?: string[];
 }

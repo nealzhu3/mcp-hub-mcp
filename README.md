@@ -9,7 +9,7 @@ A hub server that connects to and manages other MCP (Model Context Protocol) ser
 ## Overview
 
 This project builds an MCP hub server that can connect to other MCP servers, list their tools, and execute them.
-It is especially useful for bypassing Cursor’s 40-tool MCP limit.
+It is especially useful for bypassing Cursor's 40-tool MCP limit.
 Even outside of Cursor, it helps reduce AI mistakes by hiding infrequently used tools.
 
 ## Key Features
@@ -17,6 +17,7 @@ Even outside of Cursor, it helps reduce AI mistakes by hiding infrequently used 
 - Automatic connection to other MCP servers via configuration file
 - List available tools on connected servers
 - Call tools on connected servers and return results
+- Filter tools by name using include/exclude patterns
 
 ## Configuration
 
@@ -117,12 +118,20 @@ Configuration file format:
     "serverName1": {
       "command": "command",
       "args": ["arg1", "arg2", ...],
-      "env": { "ENV_VAR1": "value1", ... }
+      "env": { "ENV_VAR1": "value1", ... },
+      "filters": {
+        "include": ["tool1", "tool*"],
+        "exclude": ["dangerous*"]
+      }
     },
     "serverName2": {
       "command": "anotherCommand",
       "args": ["arg1", "arg2", ...]
     }
+  },
+  "globalFilters": {
+    "include": ["useful*"],
+    "exclude": ["experimental*"]
   }
 }
 ```
@@ -139,15 +148,85 @@ Example:
         "@modelcontextprotocol/server-filesystem",
         "/Users/username/Desktop",
         "/Users/username/Downloads"
-      ]
+      ],
+      "filters": {
+        "include": ["read*", "write*", "list*"]
+      }
     },
     "other-server": {
       "command": "node",
-      "args": ["path/to/other-mcp-server.js"]
+      "args": ["path/to/other-mcp-server.js"],
+      "filters": {
+        "exclude": ["dangerous*", "experimental*"]
+      }
     }
+  },
+  "globalFilters": {
+    "exclude": ["deprecated*"]
   }
 }
 ```
+
+## Tool Filtering
+
+The MCP-Hub-MCP server supports filtering tools by name using include/exclude patterns. You can configure filters in the following ways:
+
+### Command Line Arguments
+
+```bash
+# Include only tools matching specific patterns (comma-separated)
+npx mcp-hub-mcp --include-tools="read*,write*,list*"
+
+# Exclude tools matching specific patterns (comma-separated)
+npx mcp-hub-mcp --exclude-tools="dangerous*,experimental*"
+
+# Combine include and exclude filters
+npx mcp-hub-mcp --include-tools="read*,write*" --exclude-tools="*sensitive*"
+```
+
+### Configuration File
+
+You can configure filters per server or globally in the configuration file:
+
+```json
+{
+  "mcpServers": {
+    "serverName": {
+      "command": "command",
+      "args": ["arg1", "arg2"],
+      "filters": {
+        "include": ["pattern1", "pattern2"],
+        "exclude": ["pattern3"]
+      }
+    }
+  },
+  "globalFilters": {
+    "include": ["pattern4"],
+    "exclude": ["pattern5", "pattern6"]
+  }
+}
+```
+
+Filter patterns support glob-style wildcards:
+- `*` - Matches any number of characters
+- `?` - Matches a single character
+
+Special pattern formats:
+- `prefix.` - A pattern ending with a dot will match any tool name that starts with that prefix (namespace filtering)
+- `exact` - An exact string will match only tools with that exact name
+
+Examples:
+- `jira.` - Matches all tools that start with "jira." (like "jira.create_issue", "jira.search")
+- `read*` - Matches all tools that start with "read" (like "readFile", "readDirectory")
+- `*sensitive*` - Matches any tool with "sensitive" in the name
+
+### Filter Precedence
+
+Filters are applied in the following order:
+1. Server-specific filters are applied first
+2. Global filters are applied to the remaining tools
+
+This allows for fine-grained control over which tools are available from each server.
 
 ## Usage
 

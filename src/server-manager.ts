@@ -4,6 +4,7 @@ import {
   ConnectMcpParams,
   McpConfig,
   McpServerConfig,
+  ToolFilterConfig
 } from "./types.js";
 import fs from "fs";
 import path from "path";
@@ -71,6 +72,8 @@ function loadConfigFile(configPath: string): McpConfig {
 export class McpServerManager {
   private clients: Map<string, Client> = new Map();
   private configPath?: string;
+  private serverFilters: Map<string, ToolFilterConfig> = new Map();
+  private globalFilters?: ToolFilterConfig;
 
   /**
    * MCP Server Manager constructor
@@ -78,9 +81,12 @@ export class McpServerManager {
   constructor(options?: {
     configPath?: string;
     autoLoad?: boolean;
+    globalFilters?: ToolFilterConfig;
   }) {
     this.configPath =
       options?.configPath || findConfigPath();
+    
+    this.globalFilters = options?.globalFilters;
 
     if (options?.autoLoad && this.configPath) {
       try {
@@ -108,6 +114,11 @@ export class McpServerManager {
 
     const config = loadConfigFile(path);
 
+    // Set global filters if provided in config
+    if (config.globalFilters) {
+      this.globalFilters = config.globalFilters;
+    }
+
     if (
       !config.mcpServers ||
       Object.keys(config.mcpServers).length === 0
@@ -129,6 +140,11 @@ export class McpServerManager {
       }
 
       try {
+        // Store filter configuration if provided
+        if (serverConfig.filters) {
+          this.serverFilters.set(serverName, serverConfig.filters);
+        }
+        
         await this.connectToServer(
           serverName,
           serverConfig
@@ -196,7 +212,98 @@ export class McpServerManager {
    */
   async listTools(serverName: string): Promise<any> {
     const client = this.getClient(serverName);
-    return await client.listTools();
+    const tools = await client.listTools();
+    
+    // Apply filters to the tools if filters exist
+    return this.applyFilters(tools, serverName);
+  }
+  
+  /**
+   * Apply filters to the tools list
+   */
+  private applyFilters(tools: any, serverName: string): any {
+    // If the tools structure doesn't match expected format, return as is
+    if (!tools || !Array.isArray(tools.tools)) {
+      return tools;
+    }
+    
+    let filteredTools = [...tools.tools];
+    
+    // Apply server-specific filters if they exist
+    const serverFilters = this.serverFilters.get(serverName);
+    if (serverFilters) {
+      filteredTools = this.filterToolsByConfig(filteredTools, serverFilters);
+    }
+    
+    // Apply global filters if they exist
+    if (this.globalFilters) {
+      filteredTools = this.filterToolsByConfig(filteredTools, this.globalFilters);
+    }
+    
+    // Return the filtered tools in the same format as the original
+    return {
+      ...tools,
+      tools: filteredTools
+    };
+  }
+  
+  /**
+   * Filter tools based on filter configuration
+   */
+  private filterToolsByConfig(tools: any[], filterConfig: ToolFilterConfig): any[] {
+    if (!tools || tools.length === 0) {
+      return tools;
+    }
+    
+    let filteredTools = [...tools];
+    
+    // Apply include filters if they exist
+    if (filterConfig.include && filterConfig.include.length > 0) {
+      filteredTools = filteredTools.filter(tool => {
+        if (!tool.name) return false;
+        
+        // Check if tool name matches any of the include patterns
+        return filterConfig.include!.some(pattern => 
+          this.matchesPattern(tool.name, pattern)
+        );
+      });
+    }
+    
+    // Apply exclude filters if they exist
+    if (filterConfig.exclude && filterConfig.exclude.length > 0) {
+      filteredTools = filteredTools.filter(tool => {
+        if (!tool.name) return true;
+        
+        // Check if tool name doesn't match any of the exclude patterns
+        return !filterConfig.exclude!.some(pattern => 
+          this.matchesPattern(tool.name, pattern)
+        );
+      });
+    }
+    
+    return filteredTools;
+  }
+  
+  /**
+   * Check if a tool name matches a pattern
+   * Supports simple glob patterns with * (wildcard)
+   */
+  private matchesPattern(toolName: string, pattern: string): boolean {
+    // Handle exact string matches and pattern ending with dot (namespace prefix)
+    if (pattern.endsWith('.')) {
+      // For patterns ending with dot, check if the tool name starts with the pattern
+      return toolName.startsWith(pattern);
+    }
+    
+    // Convert glob pattern to regex
+    const regexPattern = pattern
+      .replace(/[+?^${}()|[\]\\]/g, '\\$&') // Escape regex special chars except * and ? and .
+      .replace(/\./g, '\\.') // Explicitly escape dots
+      .replace(/\*/g, '.*')
+      .replace(/\?/g, '.');
+      
+    const regex = new RegExp(`^${regexPattern}$`, 'i');
+    return regex.test(toolName);
   }
 
   /**

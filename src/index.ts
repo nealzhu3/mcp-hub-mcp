@@ -3,11 +3,33 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { McpServerManager } from "./server-manager.js";
-import { CallToolParamsSchema } from "./types.js";
+import { CallToolParamsSchema, ToolFilterConfig } from "./types.js";
 
-// Create MCP server manager instance (auto load enabled)
+// Parse command line arguments for filters
+function parseFilterArgs(): ToolFilterConfig | undefined {
+  const includeIdx = process.argv.indexOf('--include-tools');
+  const excludeIdx = process.argv.indexOf('--exclude-tools');
+  
+  const filters: ToolFilterConfig = {};
+  
+  if (includeIdx !== -1 && includeIdx < process.argv.length - 1) {
+    filters.include = process.argv[includeIdx + 1].split(',');
+  }
+  
+  if (excludeIdx !== -1 && excludeIdx < process.argv.length - 1) {
+    filters.exclude = process.argv[excludeIdx + 1].split(',');
+  }
+  
+  return (filters.include || filters.exclude) ? filters : undefined;
+}
+
+// Get global filters from command line arguments
+const globalFilters = parseFilterArgs();
+
+// Create MCP server manager instance with global filters
 const serverManager = new McpServerManager({
   autoLoad: true,
+  globalFilters
 });
 
 // Create MCP server
@@ -21,12 +43,11 @@ const server = new McpServer({
 // Tool to return tools list from all servers
 server.tool(
   "list-all-tools",
-  "List all available tools from all connected servers. Before starting any task based on the user’s request, always begin by using this tool to get a list of any additional tools that may be available for use.",
+  "List all available tools from all connected servers. Before starting any task based on the user's request, always begin by using this tool to get a list of any additional tools that may be available for use.",
   {}, // Use empty object when there are no parameters
   async (args, extra) => {
     try {
       const servers = serverManager.getConnectedServers();
-
       if (servers.length === 0) {
         return {
           content: [
